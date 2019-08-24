@@ -31,41 +31,40 @@ export async function getGo(version: string) {
   // clear GOROOT
   core.exportVariable('GOROOT', '');
 
-  let tip = version === 'tip';
-  if (tip) {
-    version = '1.12.x';
-  }
-
-  const selected = await determineVersion(version);
-  if (selected) {
-    version = selected;
-  }
-
-  // check cache
-  let toolPath: string = tc.find('go', normalizeVersion(version));
-
-  if (!toolPath) {
-    // download, extract, cache
-    toolPath = await acquireGo(version);
-    core.debug('Go tool is cached under ' + toolPath);
-  }
-
-  let goBinary = path.join(toolPath, 'bin/go');
-  let goBin = await getGoBin(goBinary);
-  if (tip) {
-    await goExec(goBinary, ['get', '-v', 'golang.org/dl/gotip']);
-    goBinary = path.join(goBin, 'gotip');
+  let goBinary = '';
+  if (version === 'tip') {
+    // install tip via go get, no caching
+    await goExec('go', ['get', '-v', 'golang.org/dl/gotip']);
+    let sytemGoBinPath = await getGoBinPath('go');
+    goBinary = path.join(sytemGoBinPath, 'gotip');
     await goExec(goBinary, ['download']);
-    goBin = await getGoBin(goBinary);
+  } else {
+    // install specified version from tar.gz/zip
+    const selected = await determineVersion(version);
+    if (selected) {
+      version = selected;
+    }
+
+    // check cache
+    let toolPath: string = tc.find('go', normalizeVersion(version));
+
+    if (!toolPath) {
+      // download, extract, cache
+      toolPath = await acquireGo(version);
+      core.debug('Go tool is cached under ' + toolPath);
+    }
+
+    goBinary = path.join(toolPath, 'bin/go');
   }
 
+  let goBinPath = await getGoBinPath(goBinary);
   let goRoot = await goExec(goBinary, ['env', 'GOROOT']);
-  let goRootBin = path.join(goRoot, 'bin');
+  let goRootBinPath = path.join(goRoot, 'bin');
   //
   // prepend the tools path. instructs the agent to prepend for future tasks
   //
-  core.addPath(goRootBin);
-  core.addPath(goBin);
+  core.addPath(goRootBinPath);
+  core.addPath(goBinPath);
 }
 
 async function acquireGo(version: string): Promise<string> {
@@ -123,7 +122,7 @@ function getDownloadUrl(filename: string): string {
   return util.format('https://storage.googleapis.com/golang/%s', filename);
 }
 
-async function getGoBin(goBinary: string): Promise<string> {
+async function getGoBinPath(goBinary: string): Promise<string> {
   let goPath = await goExec(goBinary, ['env', 'GOPATH']);
   let goBin = await goExec(goBinary, ['env', 'GOBIN']);
 
