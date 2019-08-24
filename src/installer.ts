@@ -28,14 +28,21 @@ if (!tempDirectory) {
 }
 
 export async function getGo(version: string) {
+  // clear GOROOT
+  core.exportVariable('GOROOT', '');
+
+  let tip = version === 'tip';
+  if (tip) {
+    version = '1.12.x';
+  }
+
   const selected = await determineVersion(version);
   if (selected) {
     version = selected;
   }
 
   // check cache
-  let toolPath: string;
-  toolPath = tc.find('go', normalizeVersion(version));
+  let toolPath: string = tc.find('go', normalizeVersion(version));
 
   if (!toolPath) {
     // download, extract, cache
@@ -44,9 +51,15 @@ export async function getGo(version: string) {
   }
 
   let goBinary = path.join(toolPath, 'bin/go');
-
   let goBin = await getGoBin(goBinary);
-  let goRoot = await goEnv(goBinary, 'GOROOT');
+  if (tip) {
+    await goExec(goBinary, ['get', '-v', 'golang.org/dl/gotip']);
+    goBinary = path.join(goBin, 'gotip');
+    await goExec(goBinary, ['download']);
+    goBin = await getGoBin(goBinary);
+  }
+
+  let goRoot = await goExec(goBinary, ['env', 'GOROOT']);
   let goRootBin = path.join(goRoot, 'bin');
   //
   // prepend the tools path. instructs the agent to prepend for future tasks
@@ -111,8 +124,8 @@ function getDownloadUrl(filename: string): string {
 }
 
 async function getGoBin(goBinary: string): Promise<string> {
-  let goPath = await goEnv(goBinary, 'GOPATH');
-  let goBin = await goEnv(goBinary, 'GOBIN');
+  let goPath = await goExec(goBinary, ['env', 'GOPATH']);
+  let goBin = await goExec(goBinary, ['env', 'GOBIN']);
 
   if (goPath && !goBin) {
     goBin = path.join(goPath, 'bin');
@@ -121,10 +134,10 @@ async function getGoBin(goBinary: string): Promise<string> {
   return goBin;
 }
 
-async function goEnv(goBinary: string, envVar: string): Promise<string> {
+async function goExec(goBinary: string, args: string[]): Promise<string> {
   var output = '';
 
-  let resultCode = await exec.exec(goBinary, ['env', envVar], {
+  let resultCode = await exec.exec(goBinary, args, {
     listeners: {
       stdout: (data: Buffer) => {
         output += data.toString();
@@ -133,7 +146,7 @@ async function goEnv(goBinary: string, envVar: string): Promise<string> {
   });
 
   if (resultCode != 0) {
-    throw `Failed to detect os with result code ${resultCode}. Output: ${output}`;
+    throw `Failed to run command with result code ${resultCode}. Output: ${output}`;
   }
 
   return output.trim();
