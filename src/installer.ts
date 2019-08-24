@@ -1,6 +1,7 @@
 // Load tempDirectory before it gets wiped by tool-cache
 let tempDirectory = process.env['RUNNER_TEMPDIRECTORY'] || '';
 import * as core from '@actions/core';
+import * as exec from '@actions/exec';
 import * as tc from '@actions/tool-cache';
 import * as os from 'os';
 import * as path from 'path';
@@ -42,13 +43,16 @@ export async function getGo(version: string) {
     core.debug('Go tool is cached under ' + toolPath);
   }
 
-  setGoEnvironmentVariables(toolPath);
+  let goBinary = path.join(toolPath, 'bin/go');
 
-  toolPath = path.join(toolPath, 'bin');
+  let goBin = await getGoBin(goBinary);
+  let goRoot = await goEnv(goBinary, 'GOROOT');
+  let goRootBin = path.join(goRoot, 'bin');
   //
   // prepend the tools path. instructs the agent to prepend for future tasks
   //
-  core.addPath(toolPath);
+  core.addPath(goRootBin);
+  core.addPath(goBin);
 }
 
 async function acquireGo(version: string): Promise<string> {
@@ -106,19 +110,33 @@ function getDownloadUrl(filename: string): string {
   return util.format('https://storage.googleapis.com/golang/%s', filename);
 }
 
-function setGoEnvironmentVariables(goRoot: string) {
-  core.exportVariable('GOROOT', goRoot);
+async function getGoBin(goBinary: string): Promise<string> {
+  let goPath = await goEnv(goBinary, 'GOPATH');
+  let goBin = await goEnv(goBinary, 'GOBIN');
 
-  const goPath: string = process.env['GOPATH'] || '';
-  const goBin: string = process.env['GOBIN'] || '';
+  if (goPath && !goBin) {
+    goBin = path.join(goPath, 'bin');
+  }
 
-  // set GOPATH and GOBIN as user value
-  if (goPath) {
-    core.exportVariable('GOPATH', goPath);
+  return goBin;
+}
+
+async function goEnv(goBinary: string, envVar: string): Promise<string> {
+  var output = '';
+
+  let resultCode = await exec.exec(goBinary, ['env', envVar], {
+    listeners: {
+      stdout: (data: Buffer) => {
+        output += data.toString();
+      }
+    }
+  });
+
+  if (resultCode != 0) {
+    throw `Failed to detect os with result code ${resultCode}. Output: ${output}`;
   }
-  if (goBin) {
-    core.exportVariable('GOBIN', goBin);
-  }
+
+  return output.trim();
 }
 
 // This function is required to convert the version 1.10 to 1.10.0.
